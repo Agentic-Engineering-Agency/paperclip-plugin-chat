@@ -1344,6 +1344,43 @@ export function ChatPage(_props: PluginPageProps) {
 // ChatSidebarPanel — compact sidebar entry point
 // ---------------------------------------------------------------------------
 
-export function ChatSidebarPanel() {
-  return null;
+export function ChatSidebarPanel(props: PluginPageProps) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Open Paperclip orchestrator chat"
+        className="fixed bottom-4 left-4 z-50 h-12 w-12 rounded-full bg-primary text-primary-foreground shadow-lg border border-border flex items-center justify-center cursor-pointer hover:opacity-90 transition-opacity"
+      >
+        <IconChat size={22} />
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-50 pointer-events-none">
+          <div className="absolute bottom-20 left-4 w-[min(920px,calc(100vw-2rem))] h-[min(720px,calc(100vh-6rem))] rounded-2xl border border-border bg-background shadow-2xl overflow-hidden pointer-events-auto flex flex-col">
+            <div className="h-11 px-4 border-b border-border flex items-center justify-between bg-card shrink-0">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <IconChat size={16} />
+                Paperclip Orchestrator
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Close Paperclip orchestrator chat"
+                className="h-8 w-8 rounded-md border border-border bg-transparent text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <ChatPage {...props} />
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
