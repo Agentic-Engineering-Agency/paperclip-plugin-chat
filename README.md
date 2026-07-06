@@ -1,15 +1,15 @@
 # @paperclipai/plugin-chat
 
-Multi-adapter AI chat plugin for Paperclip. Provides a conversational interface to Paperclip agents with thread management, slash commands, and real-time streaming.
+Multi-adapter AI chat plugin for Paperclip. Provides a conversational interface to Paperclip agents with thread management, slash commands, a bottom-left launcher, and a modal chat window.
 
 ## How It Works
 
-The plugin creates a chat UI inside the Paperclip plugin page slot. When a user sends a message, the plugin:
+The plugin adds a bottom-left floating Chat launcher in the Paperclip UI. When a user opens it and sends a message, the plugin:
 
 1. Creates a thread (persisted in plugin state)
 2. Finds a compatible agent via `ctx.agents.list()` (prefers "Chat Assistant", falls back to role "general")
 3. Creates or resumes an agent session via `ctx.agents.sessions`
-4. Streams the agent's response back to the UI
+4. Streams the agent's response back to the modal UI
 
 All LLM access goes through Paperclip's agent session system. The plugin does not talk to models directly — it talks to agents that talk to models. See [Plugin vs Core Analysis](docs/plugin-vs-core-chat.md) for the implications of this architecture.
 
@@ -18,6 +18,19 @@ All LLM access goes through Paperclip's agent session system. The plugin does no
 - A running Paperclip instance
 - At least one agent with `adapterType: "claude_local"` (or another supported adapter)
 - The plugin installed and enabled in **Settings > Plugins**
+
+## Install & test
+
+```bash
+npm install
+npm run build
+```
+
+Then copy the built bundle into the Paperclip server image, enable the plugin in **Settings > Plugins**, and hard refresh the browser.
+
+For a local smoke test, open the bottom-left Chat launcher, start a thread, send a message, and confirm the assistant response streams back into the modal.
+
+Run `npm run typecheck` when you want a fast sanity check without rebuilding the UI.
 
 ## Build
 
@@ -70,8 +83,8 @@ Navigate to **Settings > Plugins > Chat** (gear icon):
 
 | Setting | Description |
 |---------|-------------|
-| Default Adapter | Adapter type for new threads (`claude_local`, `codex_local`, `opencode_local`) |
-| System Prompt Override | Custom text appended to chat sessions |
+| Default Adapter | Adapter type for new threads (`claude_local`, `codex_local`, `opencode_local`); the UI preselects it when starting a new chat. |
+| System Prompt Override | Custom operator instructions prepended to the first message in each new agent session. |
 
 ## Plugin Capabilities
 

@@ -1,5 +1,5 @@
 import type { PluginPageProps } from "@paperclipai/plugin-sdk/ui";
-import { usePluginData, usePluginAction, useHostContext, usePluginStream } from "@paperclipai/plugin-sdk/ui";
+import { usePluginData, usePluginAction, useHostContext, useHostLocation, usePluginStream } from "@paperclipai/plugin-sdk/ui";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -8,6 +8,7 @@ import type {
   ChatMessage,
   ChatSegment,
   ChatAdapterInfo,
+  ChatAgentInfo,
   ChatStreamEvent,
 } from "../types.js";
 
@@ -640,6 +641,10 @@ const QUICK_ACTIONS = [
   { label: "Agent status", prompt: "Show me the status of all agents — who's active, idle, what they're working on, and any budget concerns." },
 ];
 
+function ChatPageErrorBoundary({ children, onDismiss }: { children: React.ReactNode; onDismiss: () => void }) {
+  return <>{children}</>;
+}
+
 // ---------------------------------------------------------------------------
 // ChatInput — unified input container matching core UI
 // ---------------------------------------------------------------------------
@@ -661,6 +666,9 @@ function ChatInput({
   setSlashMenuIndex,
   selectCommand,
   availableAdapters,
+  availableAgents,
+  selectedAgentId,
+  setSelectedAgentId,
   selectedAdapter,
   setSelectedAdapter,
   selectedThread,
@@ -684,6 +692,9 @@ function ChatInput({
   setSlashMenuIndex: (i: number) => void;
   selectCommand: (cmd: SlashCommand) => void;
   availableAdapters: ChatAdapterInfo[];
+  availableAgents: ChatAgentInfo[];
+  selectedAgentId: string;
+  setSelectedAgentId: (v: string) => void;
   selectedAdapter: string;
   setSelectedAdapter: (v: string) => void;
   selectedThread: ChatThread | null;
@@ -755,24 +766,50 @@ function ChatInput({
         )}
       </div>
 
-      {/* Adapter / model selector row */}
+      {/* Agent / adapter / model selector row */}
       <div className="flex items-center gap-1 mt-1.5 text-[11px] text-muted-foreground px-1">
-        {availableAdapters.length > 0 && (
-          <span className={selectedThread ? "cursor-default opacity-50" : "cursor-pointer opacity-70"}>
-            {availableAdapters.length > 1 && !selectedThread ? (
-              <select
-                value={selectedAdapter}
-                onChange={(e) => setSelectedAdapter(e.target.value)}
-                className="bg-transparent border-none text-[inherit] text-[inherit] cursor-pointer p-0 font-[inherit]"
-              >
-                {availableAdapters.map((a) => (
-                  <option key={a.type} value={a.type}>{a.label}</option>
-                ))}
-              </select>
-            ) : (
-              <span>{availableAdapters.find((a) => a.type === selectedAdapter)?.label ?? "Claude"}</span>
-            )}
-          </span>
+        <span className={selectedThread ? "cursor-default opacity-50" : "cursor-pointer opacity-70"}>
+          {!selectedThread ? (
+            <select
+              value={selectedAgentId}
+              onChange={(e) => {
+                const nextAgentId = e.target.value;
+                setSelectedAgentId(nextAgentId);
+                if (nextAgentId) {
+                  const agent = availableAgents.find((a) => a.id === nextAgentId);
+                  if (agent) setSelectedAdapter(agent.adapterType);
+                }
+              }}
+              className="bg-transparent border-none text-[inherit] text-[inherit] cursor-pointer p-0 font-[inherit]"
+            >
+              {availableAgents.map((agent) => (
+                <option key={agent.id} value={agent.id}>{agent.name} · {agent.adapterLabel}</option>
+              ))}
+              <option value="">Auto · adapter fallback</option>
+            </select>
+          ) : (
+            <span>{selectedThread.agentName ?? availableAdapters.find((a) => a.type === selectedThread.adapterType)?.label ?? selectedThread.adapterType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}</span>
+          )}
+        </span>
+        {selectedAgentId === "" && !selectedThread && availableAdapters.length > 0 && (
+          <>
+            <span className="opacity-40">/</span>
+            <span className="opacity-70">
+              {availableAdapters.length > 1 ? (
+                <select
+                  value={selectedAdapter}
+                  onChange={(e) => setSelectedAdapter(e.target.value)}
+                  className="bg-transparent border-none text-[inherit] text-[inherit] cursor-pointer p-0 font-[inherit]"
+                >
+                  {availableAdapters.map((a) => (
+                    <option key={a.type} value={a.type}>{a.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <span>{availableAdapters.find((a) => a.type === selectedAdapter)?.label ?? selectedAdapter.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}</span>
+              )}
+            </span>
+          </>
         )}
         {currentModels.length > 0 && (
           <>
@@ -809,7 +846,8 @@ export function ChatPage(_props: PluginPageProps) {
 
   // Thread state
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
-  const [selectedAdapter, setSelectedAdapter] = useState("claude_local");
+  const [selectedAdapter, setSelectedAdapter] = useState("");
+  const [selectedAgentId, setSelectedAgentId] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -849,6 +887,7 @@ export function ChatPage(_props: PluginPageProps) {
     threadId: selectedThreadId,
   });
   const { data: adapters } = usePluginData<ChatAdapterInfo[]>("adapters", { companyId });
+  const { data: agents } = usePluginData<ChatAgentInfo[]>("agents", { companyId });
   const createThread = usePluginAction("createThread");
   const deleteThread = usePluginAction("deleteThread");
   const sendMessage = usePluginAction("sendMessage");
@@ -864,17 +903,23 @@ export function ChatPage(_props: PluginPageProps) {
 
   // Derived state
   const availableAdapters = adapters?.filter((a) => a.available) ?? [];
+  const availableAgents = agents?.filter((a) => a.status !== "terminated") ?? [];
   const currentAdapter = availableAdapters.find((a) => a.type === selectedAdapter) ?? availableAdapters[0];
-  const currentModels = currentAdapter?.models ?? [];
+  const currentModels = selectedAgentId === "" ? (currentAdapter?.models ?? []) : [];
   const selectedThread = threads?.find((t) => t.id === selectedThreadId) ?? null;
   const isStreaming = selectedThread?.status === "running" || sending;
-
   // Slash command detection
   const slashMatch = input.match(/^\/(\w*)$/);
   const slashQuery = slashMatch ? slashMatch[1].toLowerCase() : null;
   const filteredCommands = slashQuery !== null
     ? BUILTIN_COMMANDS.filter((c) => c.name.startsWith(slashQuery))
     : [];
+  useEffect(() => {
+    if (selectedThread || selectedAgentId || availableAdapters.length === 0) return;
+    if (!selectedAdapter || !availableAdapters.some((adapter) => adapter.type === selectedAdapter)) {
+      setSelectedAdapter(availableAdapters[0].type);
+    }
+  }, [availableAdapters, selectedAdapter, selectedAgentId, selectedThread]);
   const showSlashMenu = slashQuery !== null && filteredCommands.length > 0 && !isStreaming;
 
   // Process stream events
@@ -915,9 +960,10 @@ export function ChatPage(_props: PluginPageProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingText]);
 
-  // Lock adapter on existing thread
+  // Lock selector on existing thread
   useEffect(() => {
     if (selectedThread) {
+      setSelectedAgentId(selectedThread.agentId ?? "");
       setSelectedAdapter(selectedThread.adapterType);
       setSelectedModel(selectedThread.model);
     }
@@ -946,15 +992,18 @@ export function ChatPage(_props: PluginPageProps) {
   // ── Handlers ────────────────────────────────────────────────────
 
   const handleNewThread = useCallback(async () => {
+    const selectedAgent = selectedAgentId ? availableAgents.find((agent) => agent.id === selectedAgentId) : null;
     const thread = await createThread({
       companyId,
-      adapterType: selectedAdapter,
-      model: selectedModel,
+      adapterType: selectedAgent?.adapterType ?? currentAdapter?.type ?? selectedAdapter,
+      model: selectedAgent ? "" : selectedModel,
       title: "New Chat",
+      agentId: selectedAgent?.id,
+      agentName: selectedAgent?.name,
     }) as ChatThread;
     setSelectedThreadId(thread.id);
     refreshThreads();
-  }, [companyId, selectedAdapter, selectedModel, createThread, refreshThreads]);
+  }, [companyId, selectedAgentId, availableAgents, selectedAdapter, selectedModel, createThread, refreshThreads]);
 
   const handleDeleteThread = useCallback(async (threadId: string) => {
     await deleteThread({ threadId, companyId });
@@ -969,10 +1018,13 @@ export function ChatPage(_props: PluginPageProps) {
     let threadId = selectedThreadId;
 
     if (!threadId) {
+      const selectedAgent = selectedAgentId ? availableAgents.find((agent) => agent.id === selectedAgentId) : null;
       const thread = await createThread({
         companyId,
-        adapterType: selectedAdapter,
-        model: selectedModel,
+        adapterType: selectedAgent?.adapterType ?? currentAdapter?.type ?? selectedAdapter,
+        model: selectedAgent ? "" : selectedModel,
+        agentId: selectedAgent?.id,
+        agentName: selectedAgent?.name,
       }) as ChatThread;
       threadId = thread.id;
       setSelectedThreadId(threadId);
@@ -1001,7 +1053,7 @@ export function ChatPage(_props: PluginPageProps) {
       refreshMessages();
       refreshThreads();
     }
-  }, [input, sending, selectedThreadId, companyId, selectedAdapter, selectedModel, createThread, sendMessage, refreshMessages, refreshThreads]);
+  }, [input, sending, selectedThreadId, companyId, selectedAgentId, availableAgents, selectedAdapter, selectedModel, createThread, sendMessage, refreshMessages, refreshThreads]);
 
   const handleStop = useCallback(async () => {
     if (!selectedThreadId) return;
@@ -1016,10 +1068,13 @@ export function ChatPage(_props: PluginPageProps) {
     setInput("");
     let threadId = selectedThreadId;
     if (!threadId) {
+      const selectedAgent = selectedAgentId ? availableAgents.find((agent) => agent.id === selectedAgentId) : null;
       const thread = await createThread({
         companyId,
-        adapterType: selectedAdapter,
-        model: selectedModel,
+        adapterType: selectedAgent?.adapterType ?? selectedAdapter,
+        model: selectedAgent ? "" : selectedModel,
+        agentId: selectedAgent?.id,
+        agentName: selectedAgent?.name,
       }) as ChatThread;
       threadId = thread.id;
       setSelectedThreadId(threadId);
@@ -1039,13 +1094,16 @@ export function ChatPage(_props: PluginPageProps) {
       refreshMessages();
       refreshThreads();
     }
-  }, [selectedThreadId, companyId, selectedAdapter, selectedModel, createThread, sendMessage, refreshMessages, refreshThreads]);
+  }, [selectedThreadId, companyId, selectedAgentId, availableAgents, selectedAdapter, selectedModel, createThread, sendMessage, refreshMessages, refreshThreads]);
 
   const handleQuickAction = useCallback(async (prompt: string) => {
+    const selectedAgent = selectedAgentId ? availableAgents.find((agent) => agent.id === selectedAgentId) : null;
     const thread = await createThread({
       companyId,
-      adapterType: selectedAdapter,
-      model: selectedModel,
+      adapterType: selectedAgent?.adapterType ?? selectedAdapter,
+      model: selectedAgent ? "" : selectedModel,
+      agentId: selectedAgent?.id,
+      agentName: selectedAgent?.name,
     }) as ChatThread;
     setSelectedThreadId(thread.id);
     setSending(true);
@@ -1063,7 +1121,7 @@ export function ChatPage(_props: PluginPageProps) {
       refreshMessages();
       refreshThreads();
     }
-  }, [companyId, selectedAdapter, selectedModel, createThread, sendMessage, refreshMessages, refreshThreads]);
+  }, [companyId, selectedAgentId, availableAgents, selectedAdapter, selectedModel, createThread, sendMessage, refreshMessages, refreshThreads]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (showSlashMenu) {
@@ -1112,6 +1170,9 @@ export function ChatPage(_props: PluginPageProps) {
     setSlashMenuIndex,
     selectCommand,
     availableAdapters,
+    availableAgents,
+    selectedAgentId,
+    setSelectedAgentId,
     selectedAdapter,
     setSelectedAdapter,
     selectedThread,
@@ -1345,22 +1406,27 @@ export function ChatPage(_props: PluginPageProps) {
 // ---------------------------------------------------------------------------
 
 export function ChatSidebarPanel(props: PluginPageProps) {
+  const { pathname } = useHostLocation();
   const [open, setOpen] = useState(false);
+
+  if (pathname.includes("/plugins/paperclip-chat")) return null;
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label="Open Paperclip orchestrator chat"
-        className="fixed bottom-4 left-4 z-50 h-12 w-12 rounded-full bg-primary text-primary-foreground shadow-lg border border-border flex items-center justify-center cursor-pointer hover:opacity-90 transition-opacity"
-      >
-        <IconChat size={22} />
-      </button>
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Open Paperclip orchestrator chat"
+          className="fixed bottom-4 right-4 z-50 h-12 w-12 rounded-full bg-primary text-primary-foreground shadow-lg border border-border flex items-center justify-center cursor-pointer hover:opacity-90 transition-opacity"
+        >
+          <IconChat size={22} />
+        </button>
+      )}
 
       {open && (
         <div className="fixed inset-0 z-50 pointer-events-none">
-          <div className="absolute bottom-20 left-4 w-[min(920px,calc(100vw-2rem))] h-[min(720px,calc(100vh-6rem))] rounded-2xl border border-border bg-background shadow-2xl overflow-hidden pointer-events-auto flex flex-col">
+          <div className="absolute bottom-20 right-4 w-[min(920px,calc(100vw-2rem))] h-[min(720px,calc(100vh-6rem))] rounded-2xl border border-border bg-background shadow-2xl overflow-hidden pointer-events-auto flex flex-col">
             <div className="h-11 px-4 border-b border-border flex items-center justify-between bg-card shrink-0">
               <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                 <IconChat size={16} />
@@ -1370,12 +1436,13 @@ export function ChatSidebarPanel(props: PluginPageProps) {
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close Paperclip orchestrator chat"
-                className="h-8 w-8 rounded-md border border-border bg-transparent text-muted-foreground hover:text-foreground cursor-pointer"
+                className="p-1 rounded-md hover:bg-muted"
               >
-                ×
+                <IconStop size={16} />
               </button>
             </div>
-            <div className="flex-1 min-h-0 overflow-hidden">
+
+            <div className="flex-1 min-h-0">
               <ChatPage {...props} />
             </div>
           </div>

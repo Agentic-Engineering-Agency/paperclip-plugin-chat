@@ -9,6 +9,10 @@ export interface ChatThread {
   adapterType: string;
   /** Model used for this thread */
   model: string;
+  /** Specific hired agent locked at creation, if not using adapter auto-selection */
+  agentId?: string;
+  /** Display name for the locked agent */
+  agentName?: string;
   status: "idle" | "running" | "error";
   createdBy: string | null;
   createdAt: string;
@@ -41,6 +45,17 @@ export interface ChatAdapterInfo {
   label: string;
   available: boolean;
   models: { id: string; label: string }[];
+}
+
+/** Hired agent roster entry returned to the UI */
+export interface ChatAgentInfo {
+  id: string;
+  name: string;
+  role: string | null;
+  title: string | null;
+  status: string | null;
+  adapterType: string;
+  adapterLabel: string;
 }
 
 /** Stream event pushed from worker to UI via SSE bridge */

@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ChatStreamEvent,
   ChatAdapterInfo,
+  ChatAgentInfo,
 } from "./types.js";
 
 const PLUGIN_NAME = "paperclip-chat";
@@ -286,12 +287,34 @@ const plugin = definePlugin({
       }
     });
 
+    // ── Data: list hired agents ─────────────────────────────────────
+    ctx.data.register("agents", async (params: Record<string, unknown>) => {
+      const companyId = params.companyId as string;
+      if (!companyId) return [] as ChatAgentInfo[];
+
+      const agents = await ctx.agents.list({ companyId });
+      return agents
+        .filter((agent) => agent.status !== "terminated")
+        .map((agent) => ({
+          id: agent.id,
+          name: agent.name,
+          role: agent.role ?? null,
+          title: agent.title ?? null,
+          status: agent.status ?? null,
+          adapterType: agent.adapterType,
+          adapterLabel: adapterTypeLabel(agent.adapterType),
+        } satisfies ChatAgentInfo))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    });
+
     // ── Action: create thread ───────────────────────────────────────
     ctx.actions.register("createThread", async (params: Record<string, unknown>) => {
       const companyId = params.companyId as string;
       const adapterType = (params.adapterType as string) ?? "claude_local";
       const model = (params.model as string) ?? "";
       const title = (params.title as string) ?? "New Chat";
+      const agentId = params.agentId as string | undefined;
+      const agentName = params.agentName as string | undefined;
       if (!companyId) throw new Error("companyId is required");
 
       const thread: ChatThread = {
@@ -301,6 +324,8 @@ const plugin = definePlugin({
         sessionId: null,
         adapterType,
         model,
+        agentId,
+        agentName,
         status: "idle",
         createdBy: null,
         createdAt: new Date().toISOString(),
@@ -402,13 +427,19 @@ const plugin = definePlugin({
       // Create or resume agent session
       let sessionId = thread.sessionId;
       if (!sessionId) {
-        // Look up a chat-suitable agent by adapter type
-        // Prefer agents with role "assistant" (dedicated chat agents) over task-oriented agents
         const agents = await ctx.agents.list({ companyId });
-        const matching = agents.filter((a) => a.adapterType === thread.adapterType);
-        const agent = matching.find((a) => a.name === "Chat Assistant") ?? matching.find((a) => a.role === "general") ?? matching[0];
+        const activeAgents = agents.filter((a) => a.status !== "terminated");
+        const agent = thread.agentId
+          ? activeAgents.find((a) => a.id === thread.agentId)
+          : (() => {
+            const matching = activeAgents.filter((a) => a.adapterType === thread.adapterType);
+            return matching.find((a) => a.name === "Chat Assistant") ?? matching.find((a) => a.role === "general") ?? matching[0];
+          })();
         if (!agent) {
-          throw new Error(`No agent found with adapter type "${thread.adapterType}". Available: ${agents.map((a) => `${a.name}(${a.adapterType})`).join(", ") || "none"}`);
+          const available = activeAgents.map((a) => `${a.name}(${a.adapterType})`).join(", ") || "none";
+          throw new Error(thread.agentId
+            ? `No active agent found with id "${thread.agentId}". Available: ${available}`
+            : `No agent found with adapter type "${thread.adapterType}". Available: ${available}`);
         }
         const session = await ctx.agents.sessions.create(agent.id, companyId, {
           reason: "Chat plugin: new conversation",

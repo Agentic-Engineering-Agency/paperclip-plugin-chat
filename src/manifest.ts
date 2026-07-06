@@ -9,7 +9,7 @@ const manifest: PaperclipPluginManifestV1 = {
   version: PLUGIN_VERSION,
   displayName: "Chat",
   description:
-    "Multi-adapter AI chat for Paperclip. Supports Claude, Codex, and OpenCode with real-time streaming, session persistence, and tool visibility.",
+    "Multi-adapter AI chat for Paperclip. Supports all installed adapters, including Claude, Codex, OpenCode, and Oh My Pi, with real-time streaming, session persistence, and tool visibility.",
   author: "Paperclip",
   categories: ["workspace", "ui"],
   capabilities: [
@@ -43,7 +43,7 @@ const manifest: PaperclipPluginManifestV1 = {
         title: "Default Adapter",
         description: "Which adapter to use by default for new threads",
         default: "claude_local",
-        enum: ["claude_local", "codex_local", "opencode_local"],
+        enum: ["claude_local", "openai", "codex_local", "opencode_local", "omp_local"],
       },
       systemPromptOverride: {
         type: "string",
