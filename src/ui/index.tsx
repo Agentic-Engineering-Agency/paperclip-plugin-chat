@@ -1,6 +1,7 @@
 import type { PluginPageProps } from "@paperclipai/plugin-sdk/ui";
 import { usePluginData, usePluginAction, useHostContext, useHostLocation, usePluginStream } from "@paperclipai/plugin-sdk/ui";
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, Component } from "react";
+import type { ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
@@ -641,8 +642,44 @@ const QUICK_ACTIONS = [
   { label: "Agent status", prompt: "Show me the status of all agents — who's active, idle, what they're working on, and any budget concerns." },
 ];
 
-function ChatPageErrorBoundary({ children, onDismiss }: { children: React.ReactNode; onDismiss: () => void }) {
-  return <>{children}</>;
+class ChatPageErrorBoundary extends Component<
+  { children: ReactNode; onDismiss: () => void },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    // Surface the failure without letting it tear down the host UI.
+    console.error("[paperclip-chat] chat surface render error:", error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex flex-col items-center justify-center gap-3 h-full p-6 text-center">
+          <div className="text-sm font-medium text-foreground">Chat hit a render error</div>
+          <div className="text-xs text-muted-foreground max-w-sm break-words">
+            {this.state.error.message}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              this.setState({ error: null });
+              this.props.onDismiss();
+            }}
+            className="mt-1 h-8 px-3 rounded-md border border-border bg-transparent text-xs text-foreground hover:bg-accent cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1443,7 +1480,9 @@ export function ChatSidebarPanel(props: PluginPageProps) {
             </div>
 
             <div className="flex-1 min-h-0">
-              <ChatPage {...props} />
+              <ChatPageErrorBoundary onDismiss={() => setOpen(false)}>
+                <ChatPage {...props} />
+              </ChatPageErrorBoundary>
             </div>
           </div>
         </div>

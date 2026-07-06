@@ -1,7 +1,7 @@
 {
   "name": "@paperclipai/plugin-chat",
-  "version": "0.1.0",
-  "description": "Multi-adapter AI chat plugin for Paperclip — supports Claude, Codex, and OpenCode",
+  "version": "0.2.0",
+  "description": "Multi-adapter AI chat plugin for Paperclip — supports Claude, Codex, OpenCode, and Oh My Pi",
   "type": "module",
   "exports": {
     ".": "./dist/index.js"
@@ -14,6 +14,7 @@
   "scripts": {
     "build": "tsc && node ./scripts/build-ui.mjs",
     "clean": "rm -rf dist",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -28,7 +29,8 @@
     "esbuild": "^0.27.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.6"
   },
   "peerDependencies": {
     "react": ">=18"

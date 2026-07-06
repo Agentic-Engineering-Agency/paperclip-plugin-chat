@@ -15,10 +15,11 @@ const PLUGIN_NAME = "paperclip-chat";
 // ---------------------------------------------------------------------------
 
 /**
- * Buffers raw stdout chunks and emits parsed ChatStreamEvents for each
- * complete JSON line from Claude CLI's `--output-format stream-json`.
+ * Buffers raw stdout chunks and emits ChatStreamEvents for complete lines.
+ * Known Claude stream-json events keep their structured mapping; everything
+ * else is surfaced as plain text so non-Claude adapters are not silent.
  */
-function createStreamJsonParser(emit: (event: ChatStreamEvent) => void) {
+export function createStreamJsonParser(emit: (event: ChatStreamEvent) => void) {
   let buffer = "";
   return {
     push(chunk: string) {
@@ -29,6 +30,7 @@ function createStreamJsonParser(emit: (event: ChatStreamEvent) => void) {
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
+        let emitted = false;
         try {
           const obj = JSON.parse(trimmed) as Record<string, unknown>;
           const type = obj.type as string | undefined;
@@ -45,14 +47,17 @@ function createStreamJsonParser(emit: (event: ChatStreamEvent) => void) {
               const blockType = block.type as string | undefined;
               if (blockType === "text" && typeof block.text === "string") {
                 emit({ type: "text", text: block.text });
+                emitted = true;
               } else if (blockType === "thinking" && typeof block.thinking === "string") {
                 emit({ type: "thinking", text: block.thinking });
+                emitted = true;
               } else if (blockType === "tool_use") {
                 emit({
                   type: "tool_use",
                   name: (block.name as string) ?? "tool",
                   input: block.input,
                 });
+                emitted = true;
               }
             }
           } else if (type === "user") {
@@ -83,11 +88,13 @@ function createStreamJsonParser(emit: (event: ChatStreamEvent) => void) {
                   content: resultContent,
                   isError: block.is_error === true,
                 });
+                emitted = true;
               }
             }
           } else if (type === "system" && obj.subtype === "init") {
             if (typeof obj.session_id === "string") {
               emit({ type: "session_init", sessionId: obj.session_id });
+              emitted = true;
             }
           } else if (type === "result") {
             const usage = obj.usage as Record<string, unknown> | undefined;
@@ -101,6 +108,10 @@ function createStreamJsonParser(emit: (event: ChatStreamEvent) => void) {
                 : typeof obj.cost_usd === "number" ? obj.cost_usd
                 : undefined,
             });
+            emitted = true;
+          } else if (type === "done") {
+            emit({ type: "done" });
+            emitted = true;
           }
 
           // ── Anthropic API streaming format (fallback) ──────────────
@@ -109,13 +120,18 @@ function createStreamJsonParser(emit: (event: ChatStreamEvent) => void) {
             const delta = obj.delta as Record<string, unknown> | undefined;
             if (delta?.type === "text_delta" && typeof delta.text === "string") {
               emit({ type: "text", text: delta.text });
+              emitted = true;
             }
             if (delta?.type === "thinking_delta" && typeof delta.thinking === "string") {
               emit({ type: "thinking", text: delta.thinking });
+              emitted = true;
             }
           }
+          if (!emitted) {
+            emit({ type: "text", text: trimmed });
+          }
         } catch {
-          // Not valid JSON — skip
+          emit({ type: "text", text: trimmed });
         }
       }
     },
