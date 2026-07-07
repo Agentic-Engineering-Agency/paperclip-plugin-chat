@@ -1,7 +1,7 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
 
 export const PLUGIN_ID = "paperclip-chat";
-const PLUGIN_VERSION = "0.2.0";
+const PLUGIN_VERSION = "0.3.0";
 
 const manifest: PaperclipPluginManifestV1 = {
   id: PLUGIN_ID,
@@ -44,28 +44,52 @@ const manifest: PaperclipPluginManifestV1 = {
         description: "Which adapter to use by default for new threads",
         default: "claude_local",
         enum: ["claude_local", "openai", "codex_local", "opencode_local", "omp_local"],
+        oneOf: [
+          { const: "claude_local", title: "Claude" },
+          { const: "openai", title: "OpenAI" },
+          { const: "codex_local", title: "Codex" },
+          { const: "opencode_local", title: "OpenCode" },
+          { const: "omp_local", title: "Oh My Pi" },
+        ],
+      },
+      defaultAgentId: {
+        type: "string",
+        title: "Default Agent ID",
+        description: "Specific active Paperclip agent ID to use for new threads when none is selected",
+        default: "",
+      },
+      defaultModel: {
+        type: "string",
+        title: "Default Model",
+        description: "Model to request for new threads when supported by the selected adapter",
+        default: "",
       },
       systemPromptOverride: {
         type: "string",
         title: "System Prompt Override",
-        description: "Custom system prompt appended to all chat sessions (optional)",
+        description: "Custom system prompt prepended to the first chat message (optional)",
         default: "",
+      },
+      streamingEnabled: {
+        type: "boolean",
+        title: "Streaming Enabled",
+        description: "Publish incremental text, thinking, and tool events while responses run",
+        default: true,
+      },
+      showToolCalls: {
+        type: "boolean",
+        title: "Show Tool Calls",
+        description: "Publish tool use and result events in the chat stream",
+        default: true,
+      },
+      enrichContext: {
+        type: "boolean",
+        title: "Enrich Context",
+        description: "Include available agent context in the first message of each thread",
+        default: true,
       },
     },
   },
-
-  launchers: [
-    {
-      id: "chat-nav",
-      displayName: "Chat",
-      description: "Open the AI chat page",
-      placementZone: "sidebar",
-      action: {
-        type: "navigate",
-        target: "plugins/paperclip-chat",
-      },
-    },
-  ],
 
   ui: {
     slots: [
@@ -73,13 +97,14 @@ const manifest: PaperclipPluginManifestV1 = {
         type: "page",
         id: "chat-page",
         displayName: "Chat",
+        routePath: "chat",
         exportName: "ChatPage",
       },
       {
-        type: "sidebarPanel",
+        type: "sidebar",
         id: "chat-sidebar",
         displayName: "Chat",
-        exportName: "ChatSidebarPanel",
+        exportName: "ChatSidebarLink",
       },
     ],
   },

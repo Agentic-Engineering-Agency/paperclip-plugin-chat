@@ -1,3 +1,14 @@
+/** Operator-configurable plugin settings */
+export interface ChatPluginSettings {
+  defaultAdapterType: string;
+  defaultAgentId: string;
+  defaultModel: string;
+  systemPromptOverride: string;
+  streamingEnabled: boolean;
+  showToolCalls: boolean;
+  enrichContext: boolean;
+}
+
 /** A chat thread stored in plugin state */
 export interface ChatThread {
   id: string;

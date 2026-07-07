@@ -6,6 +6,7 @@ import type {
   ChatStreamEvent,
   ChatAdapterInfo,
   ChatAgentInfo,
+  ChatPluginSettings,
 } from "./types.js";
 
 const PLUGIN_NAME = "paperclip-chat";
@@ -226,12 +227,47 @@ function generateId(): string {
 const ADAPTER_LABELS: Record<string, string> = {
   claude_local: "Claude",
   openai: "OpenAI",
-  codex: "Codex",
-  opencode: "OpenCode",
+  codex_local: "Codex",
+  opencode_local: "OpenCode",
+  omp_local: "Oh My Pi",
 };
 
-function adapterTypeLabel(adapterType: string): string {
+export function adapterTypeLabel(adapterType: string): string {
   return ADAPTER_LABELS[adapterType] ?? adapterType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+const DEFAULT_SETTINGS: ChatPluginSettings = {
+  defaultAdapterType: "claude_local",
+  defaultAgentId: "",
+  defaultModel: "",
+  systemPromptOverride: "",
+  streamingEnabled: true,
+  showToolCalls: true,
+  enrichContext: true,
+};
+
+export function normalizePluginSettings(rawConfig: unknown): ChatPluginSettings {
+  const config = rawConfig && typeof rawConfig === "object" ? rawConfig as Record<string, unknown> : {};
+  return {
+    defaultAdapterType: typeof config.defaultAdapterType === "string" && config.defaultAdapterType ? config.defaultAdapterType : DEFAULT_SETTINGS.defaultAdapterType,
+    defaultAgentId: typeof config.defaultAgentId === "string" ? config.defaultAgentId : DEFAULT_SETTINGS.defaultAgentId,
+    defaultModel: typeof config.defaultModel === "string" ? config.defaultModel : DEFAULT_SETTINGS.defaultModel,
+    systemPromptOverride: typeof config.systemPromptOverride === "string" ? config.systemPromptOverride : DEFAULT_SETTINGS.systemPromptOverride,
+    streamingEnabled: typeof config.streamingEnabled === "boolean" ? config.streamingEnabled : DEFAULT_SETTINGS.streamingEnabled,
+    showToolCalls: typeof config.showToolCalls === "boolean" ? config.showToolCalls : DEFAULT_SETTINGS.showToolCalls,
+    enrichContext: typeof config.enrichContext === "boolean" ? config.enrichContext : DEFAULT_SETTINGS.enrichContext,
+  };
+}
+
+async function getPluginSettings(ctx: PluginContext): Promise<ChatPluginSettings> {
+  const looseCtx = ctx as unknown as {
+    config?: { get?: () => Promise<Record<string, unknown>> } | Record<string, unknown>;
+    instanceConfig?: Record<string, unknown>;
+  };
+  const rawConfig = typeof looseCtx.config?.get === "function"
+    ? await looseCtx.config.get()
+    : (looseCtx.instanceConfig ?? looseCtx.config ?? {});
+  return normalizePluginSettings(rawConfig);
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +277,9 @@ function adapterTypeLabel(adapterType: string): string {
 const plugin = definePlugin({
   async setup(ctx) {
     ctx.logger.info(`${PLUGIN_NAME} plugin setup`);
+
+    // ── Data: current plugin settings ───────────────────────────────
+    ctx.data.register("settings", async () => getPluginSettings(ctx));
 
     // ── Data: list threads ──────────────────────────────────────────
     ctx.data.register("threads", async (params: Record<string, unknown>) => {
@@ -326,12 +365,22 @@ const plugin = definePlugin({
     // ── Action: create thread ───────────────────────────────────────
     ctx.actions.register("createThread", async (params: Record<string, unknown>) => {
       const companyId = params.companyId as string;
-      const adapterType = (params.adapterType as string) ?? "claude_local";
-      const model = (params.model as string) ?? "";
-      const title = (params.title as string) ?? "New Chat";
-      const agentId = params.agentId as string | undefined;
-      const agentName = params.agentName as string | undefined;
       if (!companyId) throw new Error("companyId is required");
+      const settings = await getPluginSettings(ctx);
+      let adapterType = typeof params.adapterType === "string" && params.adapterType ? params.adapterType : settings.defaultAdapterType;
+      const model = typeof params.model === "string" && params.model ? params.model : settings.defaultModel;
+      const title = (params.title as string) ?? "New Chat";
+      let agentId = params.agentId as string | undefined;
+      let agentName = params.agentName as string | undefined;
+      if (!agentId && settings.defaultAgentId) {
+        const agents = await ctx.agents.list({ companyId });
+        const agent = agents.find((a) => a.id === settings.defaultAgentId && a.status !== "terminated");
+        if (agent) {
+          agentId = agent.id;
+          agentName = agent.name;
+          adapterType = agent.adapterType;
+        }
+      }
 
       const thread: ChatThread = {
         id: generateId(),
@@ -408,9 +457,11 @@ const plugin = definePlugin({
 
       const thread = await getThread(ctx, threadId);
       if (!thread) throw new Error("Thread not found");
+      const settings = await getPluginSettings(ctx);
 
       // Save user message
       const msgs = await getMessages(ctx, threadId);
+      const isFirstThreadMessage = msgs.length === 0;
       const userMsg: ChatMessage = {
         id: generateId(),
         threadId,
@@ -465,15 +516,20 @@ const plugin = definePlugin({
         await saveThread(ctx, thread);
       }
 
-      // Build agent context for the first message so the copilot knows about
-      // available agents and can reference them for handoff.
+      // Build first-message context only when enabled.
       let enrichedMessage = message;
-      if (isNewSession) {
-        const allAgents = await ctx.agents.list({ companyId });
-        const agentContext = allAgents.length > 0
-          ? `[Available Agents]\n${allAgents.map(a => `- @${a.name} (Role: ${a.role ?? "general"}, Title: ${a.title ?? "N/A"}, Status: ${a.status ?? "unknown"})`).join("\n")}\n\n`
-          : "";
-        enrichedMessage = agentContext + message;
+      if (isFirstThreadMessage) {
+        const parts: string[] = [];
+        const promptOverride = settings.systemPromptOverride.trim();
+        if (promptOverride) parts.push(promptOverride);
+        if (settings.enrichContext) {
+          const allAgents = await ctx.agents.list({ companyId });
+          if (allAgents.length > 0) {
+            parts.push(`[Available Agents]\n${allAgents.map(a => `- @${a.name} (Role: ${a.role ?? "general"}, Title: ${a.title ?? "N/A"}, Status: ${a.status ?? "unknown"})`).join("\n")}`);
+          }
+        }
+        parts.push(message);
+        enrichedMessage = parts.join("\n\n");
       }
 
       // Open SSE stream channel for this thread so the UI gets real-time events
@@ -521,20 +577,22 @@ const plugin = definePlugin({
               segments.segments.push({ kind: "thinking", content: chatEvent.text });
             }
           }
-          if (chatEvent.type === "tool_use") {
-            segments.segments.push({
-              kind: "tool",
-              name: chatEvent.name ?? "tool",
-              input: chatEvent.input,
-            });
-          }
-          if (chatEvent.type === "tool_result") {
-            for (let i = segments.segments.length - 1; i >= 0; i--) {
-              const seg = segments.segments[i];
-              if (seg && seg.kind === "tool" && seg.result === undefined) {
-                seg.result = chatEvent.content ?? "";
-                seg.isError = chatEvent.isError ?? false;
-                break;
+          if (settings.showToolCalls) {
+            if (chatEvent.type === "tool_use") {
+              segments.segments.push({
+                kind: "tool",
+                name: chatEvent.name ?? "tool",
+                input: chatEvent.input,
+              });
+            }
+            if (chatEvent.type === "tool_result") {
+              for (let i = segments.segments.length - 1; i >= 0; i--) {
+                const seg = segments.segments[i];
+                if (seg && seg.kind === "tool" && seg.result === undefined) {
+                  seg.result = chatEvent.content ?? "";
+                  seg.isError = chatEvent.isError ?? false;
+                  break;
+                }
               }
             }
           }
@@ -548,8 +606,12 @@ const plugin = definePlugin({
             resolve();
           }
 
-          // Push event to UI via SSE stream in real-time
-          ctx.streams.emit(streamChannel, chatEvent);
+          // Push event to UI via SSE stream in real-time when enabled.
+          const isToolEvent = chatEvent.type === "tool_use" || chatEvent.type === "tool_result";
+          const isIncrementalEvent = chatEvent.type === "text" || chatEvent.type === "thinking" || isToolEvent;
+          if ((!isIncrementalEvent || settings.streamingEnabled) && (!isToolEvent || settings.showToolCalls)) {
+            ctx.streams.emit(streamChannel, chatEvent);
+          }
         };
 
         // Parse raw stdout chunks (Claude stream-json format) into events

@@ -1,5 +1,5 @@
-import type { PluginPageProps } from "@paperclipai/plugin-sdk/ui";
-import { usePluginData, usePluginAction, useHostContext, useHostLocation, usePluginStream } from "@paperclipai/plugin-sdk/ui";
+import type { PluginPageProps, PluginSidebarProps } from "@paperclipai/plugin-sdk/ui";
+import { usePluginData, usePluginAction, useHostContext, useHostLocation, useHostNavigation, usePluginStream } from "@paperclipai/plugin-sdk/ui";
 import { useState, useEffect, useRef, useCallback, useMemo, Component } from "react";
 import type { ReactNode } from "react";
 import Markdown from "react-markdown";
@@ -11,6 +11,7 @@ import type {
   ChatAdapterInfo,
   ChatAgentInfo,
   ChatStreamEvent,
+  ChatPluginSettings,
 } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -643,7 +644,7 @@ const QUICK_ACTIONS = [
 ];
 
 class ChatPageErrorBoundary extends Component<
-  { children: ReactNode; onDismiss: () => void },
+  { children: ReactNode; onDismiss?: () => void },
   { error: Error | null }
 > {
   state: { error: Error | null } = { error: null };
@@ -669,7 +670,7 @@ class ChatPageErrorBoundary extends Component<
             type="button"
             onClick={() => {
               this.setState({ error: null });
-              this.props.onDismiss();
+              this.props.onDismiss?.();
             }}
             className="mt-1 h-8 px-3 rounded-md border border-border bg-transparent text-xs text-foreground hover:bg-accent cursor-pointer"
           >
@@ -739,6 +740,23 @@ function ChatInput({
   selectedModel: string;
   setSelectedModel: (v: string) => void;
 }) {
+  const formatAdapterLabel = (adapterType: string) => (
+    availableAdapters.find((adapter) => adapter.type === adapterType)?.label
+    ?? adapterType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  );
+  const formatAgentDetail = (agent: ChatAgentInfo) => [
+    agent.title ?? agent.role,
+    agent.adapterLabel,
+  ].filter(Boolean).join(" · ");
+  const lockedAgent = selectedThread?.agentId
+    ? availableAgents.find((agent) => agent.id === selectedThread.agentId)
+    : null;
+  const lockedAgentName = selectedThread
+    ? (selectedThread.agentName ?? lockedAgent?.name ?? formatAdapterLabel(selectedThread.adapterType))
+    : "";
+  const lockedAgentDetail = selectedThread
+    ? (lockedAgent ? formatAgentDetail(lockedAgent) : formatAdapterLabel(selectedThread.adapterType))
+    : "";
   return (
     <div className="relative">
       {showSlashMenu && (
@@ -804,67 +822,90 @@ function ChatInput({
       </div>
 
       {/* Agent / adapter / model selector row */}
-      <div className="flex items-center gap-1 mt-1.5 text-[11px] text-muted-foreground px-1">
-        <span className={selectedThread ? "cursor-default opacity-50" : "cursor-pointer opacity-70"}>
-          {!selectedThread ? (
-            <select
-              value={selectedAgentId}
-              onChange={(e) => {
-                const nextAgentId = e.target.value;
-                setSelectedAgentId(nextAgentId);
-                if (nextAgentId) {
-                  const agent = availableAgents.find((a) => a.id === nextAgentId);
-                  if (agent) setSelectedAdapter(agent.adapterType);
-                }
-              }}
-              className="bg-transparent border-none text-[inherit] text-[inherit] cursor-pointer p-0 font-[inherit]"
-            >
-              {availableAgents.map((agent) => (
-                <option key={agent.id} value={agent.id}>{agent.name} · {agent.adapterLabel}</option>
-              ))}
-              <option value="">Auto · adapter fallback</option>
-            </select>
-          ) : (
-            <span>{selectedThread.agentName ?? availableAdapters.find((a) => a.type === selectedThread.adapterType)?.label ?? selectedThread.adapterType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}</span>
-          )}
-        </span>
-        {selectedAgentId === "" && !selectedThread && availableAdapters.length > 0 && (
-          <>
-            <span className="opacity-40">/</span>
-            <span className="opacity-70">
-              {availableAdapters.length > 1 ? (
+      <div className="mt-2 px-1">
+        {!selectedThread ? (
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <label className="flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2 text-foreground">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Agent
+              </span>
+              <select
+                value={selectedAgentId}
+                onChange={(e) => {
+                  const nextAgentId = e.target.value;
+                  setSelectedAgentId(nextAgentId);
+                  if (nextAgentId) {
+                    const agent = availableAgents.find((a) => a.id === nextAgentId);
+                    if (agent) setSelectedAdapter(agent.adapterType);
+                  }
+                }}
+                className="min-w-0 flex-1 bg-transparent border-none text-sm text-foreground cursor-pointer p-0 font-[inherit] outline-none"
+              >
+                <option value="">Auto · adapter fallback</option>
+                {availableAgents.map((agent) => {
+                  const detail = formatAgentDetail(agent);
+                  return (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}{detail ? ` · ${detail}` : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+
+            {selectedAgentId === "" && availableAdapters.length > 0 && (
+              <label className="flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-2 text-foreground">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Adapter
+                </span>
+                {availableAdapters.length > 1 ? (
+                  <select
+                    value={selectedAdapter}
+                    onChange={(e) => setSelectedAdapter(e.target.value)}
+                    className="bg-transparent border-none text-[12px] text-foreground cursor-pointer p-0 font-[inherit] outline-none"
+                  >
+                    {availableAdapters.map((a) => (
+                      <option key={a.type} value={a.type}>{a.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-[12px] text-foreground">{formatAdapterLabel(selectedAdapter)}</span>
+                )}
+              </label>
+            )}
+
+            {currentModels.length > 0 && (
+              <label className="flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-2 text-foreground">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Model
+                </span>
                 <select
-                  value={selectedAdapter}
-                  onChange={(e) => setSelectedAdapter(e.target.value)}
-                  className="bg-transparent border-none text-[inherit] text-[inherit] cursor-pointer p-0 font-[inherit]"
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="bg-transparent border-none text-[12px] text-foreground cursor-pointer p-0 font-[inherit] outline-none"
                 >
-                  {availableAdapters.map((a) => (
-                    <option key={a.type} value={a.type}>{a.label}</option>
+                  {currentModels.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
                   ))}
                 </select>
-              ) : (
-                <span>{availableAdapters.find((a) => a.type === selectedAdapter)?.label ?? selectedAdapter.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}</span>
-              )}
-            </span>
-          </>
+              </label>
+            )}
+
+            <span className="ml-auto opacity-40">Shift+Enter for new line</span>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2 text-foreground">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Agent
+              </span>
+              <span className="text-sm font-medium">{lockedAgentName}</span>
+              {lockedAgentDetail && <span className="text-xs text-muted-foreground">· {lockedAgentDetail}</span>}
+            </div>
+            <span className="text-[10px] text-muted-foreground">locked for this thread</span>
+            <span className="ml-auto opacity-40">Shift+Enter for new line</span>
+          </div>
         )}
-        {currentModels.length > 0 && (
-          <>
-            <span className="opacity-40">/</span>
-            <span className="opacity-70">
-              <select
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="bg-transparent border-none text-[inherit] text-[inherit] cursor-pointer p-0 font-[inherit]"
-              >
-                {currentModels.map((m) => (
-                  <option key={m.id} value={m.id}>{m.label}</option>
-                ))}
-              </select>
-            </span>
-          </>
-        )}
-        <span className="ml-auto opacity-40">Shift+Enter for new line</span>
       </div>
     </div>
   );
@@ -874,7 +915,7 @@ function ChatInput({
 // ChatPage — full-page chat interface rendered in the plugin page slot
 // ---------------------------------------------------------------------------
 
-export function ChatPage(_props: PluginPageProps) {
+function ChatPageInner(props: PluginPageProps) {
   const { companyId } = useHostContext();
 
   // Container ref for useAvailableHeight
@@ -925,6 +966,7 @@ export function ChatPage(_props: PluginPageProps) {
   });
   const { data: adapters } = usePluginData<ChatAdapterInfo[]>("adapters", { companyId });
   const { data: agents } = usePluginData<ChatAgentInfo[]>("agents", { companyId });
+  const { data: settings } = usePluginData<ChatPluginSettings>("settings", {});
   const createThread = usePluginAction("createThread");
   const deleteThread = usePluginAction("deleteThread");
   const sendMessage = usePluginAction("sendMessage");
@@ -951,6 +993,23 @@ export function ChatPage(_props: PluginPageProps) {
   const filteredCommands = slashQuery !== null
     ? BUILTIN_COMMANDS.filter((c) => c.name.startsWith(slashQuery))
     : [];
+  useEffect(() => {
+    if (selectedThread) return;
+    if (settings?.defaultAgentId && !selectedAgentId) {
+      const agent = availableAgents.find((candidate) => candidate.id === settings.defaultAgentId);
+      if (agent) {
+        setSelectedAgentId(agent.id);
+        setSelectedAdapter(agent.adapterType);
+        return;
+      }
+    }
+    if (!selectedAgentId && settings?.defaultAdapterType && availableAdapters.some((adapter) => adapter.type === settings.defaultAdapterType)) {
+      setSelectedAdapter(settings.defaultAdapterType);
+    }
+    if (!selectedAgentId && settings?.defaultModel && !selectedModel) {
+      setSelectedModel(settings.defaultModel);
+    }
+  }, [settings, selectedThread, selectedAgentId, selectedModel, availableAgents, availableAdapters]);
   useEffect(() => {
     if (selectedThread || selectedAgentId || availableAdapters.length === 0) return;
     if (!selectedAdapter || !availableAdapters.some((adapter) => adapter.type === selectedAdapter)) {
@@ -1438,55 +1497,36 @@ export function ChatPage(_props: PluginPageProps) {
   );
 }
 
+export function ChatPage(props: PluginPageProps) {
+  return (
+    <ChatPageErrorBoundary>
+      <ChatPageInner {...props} />
+    </ChatPageErrorBoundary>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// ChatSidebarPanel — compact sidebar entry point
+// ChatSidebarLink — sidebar nav entry that routes to the full-screen chat page
 // ---------------------------------------------------------------------------
 
-export function ChatSidebarPanel(props: PluginPageProps) {
+export function ChatSidebarLink(_props: PluginSidebarProps) {
+  const nav = useHostNavigation();
   const { pathname } = useHostLocation();
-  const [open, setOpen] = useState(false);
-
-  if (pathname.includes("/plugins/paperclip-chat")) return null;
+  const link = nav.linkProps("/chat");
+  const active = pathname.endsWith("/chat") || pathname.includes("/chat?");
 
   return (
-    <>
-      {!open && (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label="Open Paperclip orchestrator chat"
-          className="fixed bottom-4 right-4 z-50 h-12 w-12 rounded-full bg-primary text-primary-foreground shadow-lg border border-border flex items-center justify-center cursor-pointer hover:opacity-90 transition-opacity"
-        >
-          <IconChat size={22} />
-        </button>
-      )}
-
-      {open && (
-        <div className="fixed inset-0 z-50 pointer-events-none">
-          <div className="absolute bottom-20 right-4 w-[min(920px,calc(100vw-2rem))] h-[min(720px,calc(100vh-6rem))] rounded-2xl border border-border bg-background shadow-2xl overflow-hidden pointer-events-auto flex flex-col">
-            <div className="h-11 px-4 border-b border-border flex items-center justify-between bg-card shrink-0">
-              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <IconChat size={16} />
-                Paperclip Orchestrator
-              </div>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                aria-label="Close Paperclip orchestrator chat"
-                className="p-1 rounded-md hover:bg-muted"
-              >
-                <IconStop size={16} />
-              </button>
-            </div>
-
-            <div className="flex-1 min-h-0">
-              <ChatPageErrorBoundary onDismiss={() => setOpen(false)}>
-                <ChatPage {...props} />
-              </ChatPageErrorBoundary>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+    <a
+      {...link}
+      className={
+        "flex items-center gap-2 px-3 py-2 rounded-md text-sm cursor-pointer transition-colors " +
+        (active
+          ? "bg-muted text-foreground font-medium"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground")
+      }
+    >
+      <IconChat size={16} />
+      <span>Chat</span>
+    </a>
   );
 }

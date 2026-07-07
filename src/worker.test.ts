@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ChatStreamEvent } from "./types.js";
-import { createStreamJsonParser } from "./worker.js";
+import { adapterTypeLabel, createStreamJsonParser, normalizePluginSettings } from "./worker.js";
 
 function parseLines(...lines: string[]): ChatStreamEvent[] {
   const events: ChatStreamEvent[] = [];
@@ -53,5 +53,51 @@ describe("createStreamJsonParser", () => {
       },
     ]);
     expect(doneEvents).toEqual([{ type: "done" }]);
+  });
+});
+
+describe("adapterTypeLabel", () => {
+  it("maps local adapter types to product labels", () => {
+    expect(adapterTypeLabel("codex_local")).toBe("Codex");
+    expect(adapterTypeLabel("opencode_local")).toBe("OpenCode");
+    expect(adapterTypeLabel("omp_local")).toBe("Oh My Pi");
+  });
+
+  it("falls back to a readable title for unknown adapter types", () => {
+    expect(adapterTypeLabel("custom_adapter")).toBe("Custom Adapter");
+  });
+});
+
+describe("normalizePluginSettings", () => {
+  it("defaults missing or invalid settings while preserving valid false booleans", () => {
+    expect(normalizePluginSettings({
+      defaultAdapterType: "",
+      defaultAgentId: 42,
+      defaultModel: "gpt-4.1",
+      systemPromptOverride: null,
+      streamingEnabled: false,
+      showToolCalls: false,
+      enrichContext: "yes",
+    })).toEqual({
+      defaultAdapterType: "claude_local",
+      defaultAgentId: "",
+      defaultModel: "gpt-4.1",
+      systemPromptOverride: "",
+      streamingEnabled: false,
+      showToolCalls: false,
+      enrichContext: true,
+    });
+  });
+
+  it("normalizes non-object settings to plugin defaults", () => {
+    expect(normalizePluginSettings(null)).toEqual({
+      defaultAdapterType: "claude_local",
+      defaultAgentId: "",
+      defaultModel: "",
+      systemPromptOverride: "",
+      streamingEnabled: true,
+      showToolCalls: true,
+      enrichContext: true,
+    });
   });
 });
