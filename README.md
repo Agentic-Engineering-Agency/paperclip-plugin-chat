@@ -1,4 +1,4 @@
-# @paperclipai/plugin-chat
+# @agentic-engineering-agency/plugin-chat
 
 Multi-adapter AI chat plugin for Paperclip. Provides an agent-first conversational interface with thread management, slash commands, a sidebar entry point, and a full-screen chat page.
 

@@ -1,7 +1,7 @@
 # Chat Plugin Testing Guide
 
 **Branch:** `plugin/chat-ui`
-**Plugin:** `@paperclipai/plugin-chat`
+**Plugin:** `@agentic-engineering-agency/plugin-chat`
 
 ---
 
@@ -22,7 +22,7 @@
 The chat plugin is part of the monorepo at `packages/plugins/plugin-chat/`. It's registered via the plugin manager in the Paperclip settings UI.
 
 1. Navigate to **Settings > Plugins** in the Paperclip UI
-2. If the Chat plugin isn't listed, install it using the **+ Install Plugin** button (package name: `@paperclipai/plugin-chat`)
+2. If the Chat plugin isn't listed, install it using the **+ Install Plugin** button (package name: `@agentic-engineering-agency/plugin-chat`)
 3. Verify the plugin shows status **ready** in the Plugin Manager
 
 ### Build (development)

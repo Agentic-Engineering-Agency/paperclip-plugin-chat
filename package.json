@@ -1,5 +1,5 @@
 {
-  "name": "@paperclipai/plugin-chat",
+  "name": "@agentic-engineering-agency/plugin-chat",
   "version": "0.3.0",
   "description": "Multi-adapter AI chat plugin for Paperclip — supports Claude, Codex, OpenCode, and Oh My Pi",
   "type": "module",
