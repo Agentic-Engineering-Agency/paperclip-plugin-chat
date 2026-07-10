@@ -52,8 +52,8 @@ The server caches UI bundles with ETags — hard refresh the browser after deplo
 
 ### Welcome Screen
 
-- [ ] Plugin loads at `/:companyPrefix/plugins/:pluginId`
-- [ ] Welcome screen shows "What can I help with?" with chat icon
+- [ ] Bottom-left **Chat** launcher appears after the plugin is enabled
+- [ ] Clicking the launcher opens the modal with "What can I help with?" and chat icon
 - [ ] Input field with "Ask Paperclip anything..." placeholder
 - [ ] Send button (paper plane icon) disabled when input is empty
 - [ ] Quick action chips: "Check in on issues", "Review goal progress", "Plan an initiative", "Agent status"
@@ -74,7 +74,7 @@ The server caches UI bundles with ETags — hard refresh the browser after deplo
 
 - [ ] Clicking a quick action chip creates a thread and sends the associated prompt
 - [ ] User message appears promptly (not after agent completes)
-- [ ] Thread appears in sidebar with auto-generated title
+- [ ] Thread appears in the modal thread list with auto-generated title
 
 ### Slash Commands
 
@@ -85,16 +85,17 @@ The server caches UI bundles with ETags — hard refresh the browser after deplo
 
 ### Thread Management
 
-- [ ] "+ New Chat" button in sidebar returns to the welcome screen
-- [ ] Selecting a thread in the sidebar loads its messages
+- [ ] "+ New Chat" button in the modal thread rail returns to the welcome screen
+- [ ] Selecting a thread in the modal thread rail loads its messages
 - [ ] Double-clicking a thread title enables inline rename
 - [ ] Clicking the "x" button on a thread shows "Delete?" confirmation (3s timeout)
 - [ ] Clicking "Delete?" again permanently deletes the thread
 
-### Sidebar
+### Launcher and Modal
 
-- [ ] Sidebar toggle button (panel icon, top-left of content area) shows/hides the sidebar
-- [ ] Thread list shows chat icon, truncated title, and absolute timestamp (e.g., "10:28 AM")
+- [ ] Launcher is fixed to the bottom-left of the Paperclip UI
+- [ ] Modal opens above the launcher and can be closed with the × button
+- [ ] Thread rail toggle button (panel icon, top-left of modal content area) shows/hides the thread rail
 - [ ] Running threads show a green pulsing dot
 
 ### Streaming

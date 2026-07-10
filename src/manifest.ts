@@ -16,6 +16,7 @@ const manifest: PaperclipPluginManifestV1 = {
     // UI
     "ui.page.register",
     "ui.sidebar.register",
+    "ui.action.register",
     // Agent sessions (streaming chat)
     "agent.sessions.create",
     "agent.sessions.list",
@@ -105,6 +106,22 @@ const manifest: PaperclipPluginManifestV1 = {
         id: "chat-sidebar",
         displayName: "Chat",
         exportName: "ChatSidebarLink",
+      },
+    ],
+    launchers: [
+      {
+        id: "chat-orchestrator-modal",
+        displayName: "Chat",
+        description: "Open the Paperclip orchestrator chat in a host-managed modal.",
+        placementZone: "globalToolbarButton",
+        action: {
+          type: "openModal",
+          target: "chat-page",
+        },
+        render: {
+          environment: "hostOverlay",
+          bounds: "wide",
+        },
       },
     ],
   },

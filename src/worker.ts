@@ -491,199 +491,217 @@ const plugin = definePlugin({
       // Track whether this is the first message in the thread (new session)
       const isNewSession = !thread.sessionId;
 
-      // Create or resume agent session
-      let sessionId = thread.sessionId;
-      if (!sessionId) {
-        const agents = await ctx.agents.list({ companyId });
-        const activeAgents = agents.filter((a) => a.status !== "terminated");
-        const agent = thread.agentId
-          ? activeAgents.find((a) => a.id === thread.agentId)
-          : (() => {
-            const matching = activeAgents.filter((a) => a.adapterType === thread.adapterType);
-            return matching.find((a) => a.name === "Chat Assistant") ?? matching.find((a) => a.role === "general") ?? matching[0];
-          })();
-        if (!agent) {
-          const available = activeAgents.map((a) => `${a.name}(${a.adapterType})`).join(", ") || "none";
-          throw new Error(thread.agentId
-            ? `No active agent found with id "${thread.agentId}". Available: ${available}`
-            : `No agent found with adapter type "${thread.adapterType}". Available: ${available}`);
-        }
-        const session = await ctx.agents.sessions.create(agent.id, companyId, {
-          reason: "Chat plugin: new conversation",
-        });
-        sessionId = session.sessionId;
-        thread.sessionId = sessionId;
-        await saveThread(ctx, thread);
-      }
-
-      // Build first-message context only when enabled.
-      let enrichedMessage = message;
-      if (isFirstThreadMessage) {
-        const parts: string[] = [];
-        const promptOverride = settings.systemPromptOverride.trim();
-        if (promptOverride) parts.push(promptOverride);
-        if (settings.enrichContext) {
-          const allAgents = await ctx.agents.list({ companyId });
-          if (allAgents.length > 0) {
-            parts.push(`[Available Agents]\n${allAgents.map(a => `- @${a.name} (Role: ${a.role ?? "general"}, Title: ${a.title ?? "N/A"}, Status: ${a.status ?? "unknown"})`).join("\n")}`);
-          }
-        }
-        parts.push(message);
-        enrichedMessage = parts.join("\n\n");
-      }
-
-      // Open SSE stream channel for this thread so the UI gets real-time events
+      // Open SSE stream channel before any risky session work so failures are visible.
       const streamChannel = `chat:${threadId}`;
       ctx.streams.open(streamChannel, companyId);
 
       // Collect response segments for persistence
       const segments: ChatMessage["metadata"] = { segments: [] };
       let fullResponse = "";
-
-      // Emit title update if it changed
-      if (thread.title !== "New Chat") {
-        ctx.streams.emit(streamChannel, { type: "title_updated", title: thread.title });
-      }
-
-      // Send message and stream events.
-      // ctx.agents.sessions.sendMessage returns immediately once the run is
-      // queued — the onEvent callback fires asynchronously via JSON-RPC
-      // notifications.  We must wait for the terminal event before saving.
-      const RUN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
       let runId: string | undefined;
 
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          reject(new Error("Chat response timed out"));
-        }, RUN_TIMEOUT_MS);
+      try {
+        // Create or resume agent session
+        let sessionId = thread.sessionId;
+        if (!sessionId) {
+          const agents = await ctx.agents.list({ companyId });
+          const activeAgents = agents.filter((a) => a.status !== "terminated");
+          const agent = thread.agentId
+            ? activeAgents.find((a) => a.id === thread.agentId)
+            : (() => {
+              const matching = activeAgents.filter((a) => a.adapterType === thread.adapterType);
+              return matching.find((a) => a.name === "Chat Assistant") ?? matching.find((a) => a.role === "general") ?? matching[0];
+            })();
+          if (!agent) {
+            const available = activeAgents.map((a) => `${a.name}(${a.adapterType})`).join(", ") || "none";
+            throw new Error(thread.agentId
+              ? `No active agent found with id "${thread.agentId}". Available: ${available}`
+              : `No agent found with adapter type "${thread.adapterType}". Available: ${available}`);
+          }
+          const session = await ctx.agents.sessions.create(agent.id, companyId, {
+            reason: "Chat plugin: new conversation",
+          });
+          sessionId = session.sessionId;
+          thread.sessionId = sessionId;
+          await saveThread(ctx, thread);
+        }
 
-        // Helper to process parsed stream events
-        const handleParsedEvent = (chatEvent: ChatStreamEvent) => {
-          // Accumulate for persistence
-          if (chatEvent.type === "text" && chatEvent.text) {
-            fullResponse += chatEvent.text;
-            const last = segments.segments[segments.segments.length - 1];
-            if (last && last.kind === "text") {
-              last.content += chatEvent.text;
-            } else {
+        // Build first-message context only when enabled.
+        let enrichedMessage = message;
+        if (isFirstThreadMessage) {
+          const parts: string[] = [];
+          const promptOverride = settings.systemPromptOverride.trim();
+          if (promptOverride) parts.push(promptOverride);
+          if (settings.enrichContext) {
+            const allAgents = await ctx.agents.list({ companyId });
+            if (allAgents.length > 0) {
+              parts.push(`[Available Agents]\n${allAgents.map(a => `- @${a.name} (Role: ${a.role ?? "general"}, Title: ${a.title ?? "N/A"}, Status: ${a.status ?? "unknown"})`).join("\n")}`);
+            }
+          }
+          parts.push(message);
+          enrichedMessage = parts.join("\n\n");
+        }
+
+        // Emit title update if it changed
+        if (thread.title !== "New Chat") {
+          ctx.streams.emit(streamChannel, { type: "title_updated", title: thread.title });
+        }
+
+        // Send message and stream events.
+        // ctx.agents.sessions.sendMessage returns immediately once the run is
+        // queued — the onEvent callback fires asynchronously via JSON-RPC
+        // notifications. We must wait for the terminal event before saving.
+        const RUN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            reject(new Error("Chat response timed out"));
+          }, RUN_TIMEOUT_MS);
+
+          // Helper to process parsed stream events
+          const handleParsedEvent = (chatEvent: ChatStreamEvent) => {
+            // Accumulate for persistence
+            if (chatEvent.type === "text" && chatEvent.text) {
+              fullResponse += chatEvent.text;
+              const last = segments.segments[segments.segments.length - 1];
+              if (last && last.kind === "text") {
+                last.content += chatEvent.text;
+              } else {
+                segments.segments.push({ kind: "text", content: chatEvent.text });
+              }
+            }
+            if (chatEvent.type === "thinking" && chatEvent.text) {
+              const last = segments.segments[segments.segments.length - 1];
+              if (last && last.kind === "thinking") {
+                last.content += chatEvent.text;
+              } else {
+                segments.segments.push({ kind: "thinking", content: chatEvent.text });
+              }
+            }
+            if (chatEvent.type === "error" && chatEvent.text) {
+              fullResponse += chatEvent.text;
               segments.segments.push({ kind: "text", content: chatEvent.text });
             }
-          }
-          if (chatEvent.type === "thinking" && chatEvent.text) {
-            const last = segments.segments[segments.segments.length - 1];
-            if (last && last.kind === "thinking") {
-              last.content += chatEvent.text;
-            } else {
-              segments.segments.push({ kind: "thinking", content: chatEvent.text });
-            }
-          }
-          if (settings.showToolCalls) {
-            if (chatEvent.type === "tool_use") {
-              segments.segments.push({
-                kind: "tool",
-                name: chatEvent.name ?? "tool",
-                input: chatEvent.input,
-              });
-            }
-            if (chatEvent.type === "tool_result") {
-              for (let i = segments.segments.length - 1; i >= 0; i--) {
-                const seg = segments.segments[i];
-                if (seg && seg.kind === "tool" && seg.result === undefined) {
-                  seg.result = chatEvent.content ?? "";
-                  seg.isError = chatEvent.isError ?? false;
-                  break;
+            if (settings.showToolCalls) {
+              if (chatEvent.type === "tool_use") {
+                segments.segments.push({
+                  kind: "tool",
+                  name: chatEvent.name ?? "tool",
+                  input: chatEvent.input,
+                });
+              }
+              if (chatEvent.type === "tool_result") {
+                for (let i = segments.segments.length - 1; i >= 0; i--) {
+                  const seg = segments.segments[i];
+                  if (seg && seg.kind === "tool" && seg.result === undefined) {
+                    seg.result = chatEvent.content ?? "";
+                    seg.isError = chatEvent.isError ?? false;
+                    break;
+                  }
                 }
               }
             }
-          }
-          if (chatEvent.type === "session_init" && chatEvent.sessionId) {
-            thread.sessionId = chatEvent.sessionId;
-          }
+            if (chatEvent.type === "session_init" && chatEvent.sessionId) {
+              thread.sessionId = chatEvent.sessionId;
+            }
 
-          // Terminal events: run completed or errored — resolve the wait
-          if (chatEvent.type === "result" || chatEvent.type === "error") {
-            clearTimeout(timer);
-            resolve();
-          }
+            // Terminal events: run completed or errored — resolve the wait
+            if (chatEvent.type === "result" || chatEvent.type === "error") {
+              clearTimeout(timer);
+              resolve();
+            }
 
-          // Push event to UI via SSE stream in real-time when enabled.
-          const isToolEvent = chatEvent.type === "tool_use" || chatEvent.type === "tool_result";
-          const isIncrementalEvent = chatEvent.type === "text" || chatEvent.type === "thinking" || isToolEvent;
-          if ((!isIncrementalEvent || settings.streamingEnabled) && (!isToolEvent || settings.showToolCalls)) {
-            ctx.streams.emit(streamChannel, chatEvent);
-          }
-        };
+            // Push event to UI via SSE stream in real-time when enabled.
+            const isToolEvent = chatEvent.type === "tool_use" || chatEvent.type === "tool_result";
+            const isIncrementalEvent = chatEvent.type === "text" || chatEvent.type === "thinking" || isToolEvent;
+            if ((!isIncrementalEvent || settings.streamingEnabled) && (!isToolEvent || settings.showToolCalls)) {
+              ctx.streams.emit(streamChannel, chatEvent);
+            }
+          };
 
-        // Parse raw stdout chunks (Claude stream-json format) into events
-        const parser = createStreamJsonParser(handleParsedEvent);
+          // Parse raw stdout chunks (Claude stream-json format) into events
+          const parser = createStreamJsonParser(handleParsedEvent);
 
-        ctx.agents.sessions.sendMessage(sessionId, companyId, {
-          prompt: enrichedMessage,
-          reason: "Chat plugin: user message",
-          onEvent: (event: AgentSessionEvent) => {
-            // The host forwards raw stdout/stderr chunks as "chunk" events.
-            // For stdout chunks, parse the Claude stream-json format.
-            if (event.eventType === "chunk") {
-              const stream = event.stream ?? (event.payload?.stream as string | undefined);
-              if (stream === "stdout" && event.message) {
-                parser.push(event.message);
+          ctx.agents.sessions.sendMessage(sessionId, companyId, {
+            prompt: enrichedMessage,
+            reason: "Chat plugin: user message",
+            onEvent: (event: AgentSessionEvent) => {
+              // The host forwards raw stdout/stderr chunks as "chunk" events.
+              // For stdout chunks, parse the Claude stream-json format.
+              if (event.eventType === "chunk") {
+                const stream = event.stream ?? (event.payload?.stream as string | undefined);
+                if (stream === "stdout" && event.message) {
+                  parser.push(event.message);
+                }
+                // Ignore stderr chunks
+                return;
               }
-              // Ignore stderr chunks
-              return;
-            }
 
-            // Terminal events from the host (run status changes)
-            if (event.eventType === "done") {
-              parser.flush();
-              handleParsedEvent({
-                type: "result",
-                usage: event.payload?.usage as ChatStreamEvent["usage"],
-                costUsd: event.payload?.costUsd as number | undefined,
-              });
-              return;
-            }
-            if (event.eventType === "error") {
-              parser.flush();
-              handleParsedEvent({ type: "error", text: event.message ?? "Unknown error" });
-              return;
-            }
-            if (event.eventType === "status" && event.payload?.sessionId) {
-              handleParsedEvent({ type: "session_init", sessionId: event.payload.sessionId as string });
-            }
-          },
-        }).then((result) => {
-          runId = result.runId;
-        }).catch((err) => {
-          clearTimeout(timer);
-          reject(err);
+              // Terminal events from the host (run status changes)
+              if (event.eventType === "done") {
+                parser.flush();
+                handleParsedEvent({
+                  type: "result",
+                  usage: event.payload?.usage as ChatStreamEvent["usage"],
+                  costUsd: event.payload?.costUsd as number | undefined,
+                });
+                return;
+              }
+              if (event.eventType === "error") {
+                parser.flush();
+                handleParsedEvent({ type: "error", text: event.message ?? "Unknown error" });
+                return;
+              }
+              if (event.eventType === "status" && event.payload?.sessionId) {
+                handleParsedEvent({ type: "session_init", sessionId: event.payload.sessionId as string });
+              }
+            },
+          }).then((result) => {
+            runId = result.runId;
+          }).catch((err) => {
+            clearTimeout(timer);
+            reject(err);
+          });
         });
-      });
 
-      // Stream complete — save assistant message
-      if (fullResponse || segments.segments.length > 0) {
+        // Stream complete — save assistant message
+        if (fullResponse || segments.segments.length > 0) {
+          const assistantMsg: ChatMessage = {
+            id: generateId(),
+            threadId,
+            role: "assistant",
+            content: fullResponse,
+            metadata: segments,
+            createdAt: new Date().toISOString(),
+          };
+          const updatedMsgs = await getMessages(ctx, threadId);
+          updatedMsgs.push(assistantMsg);
+          await saveMessages(ctx, threadId, updatedMsgs);
+        }
+
+        ctx.logger.info(`Chat message completed`, { threadId, runId });
+      } catch (err) {
+        const errorText = err instanceof Error ? err.message : String(err);
         const assistantMsg: ChatMessage = {
           id: generateId(),
           threadId,
           role: "assistant",
-          content: fullResponse,
-          metadata: segments,
+          content: errorText,
+          metadata: { segments: [{ kind: "text", content: errorText }] },
           createdAt: new Date().toISOString(),
         };
         const updatedMsgs = await getMessages(ctx, threadId);
         updatedMsgs.push(assistantMsg);
         await saveMessages(ctx, threadId, updatedMsgs);
+        ctx.streams.emit(streamChannel, { type: "error", text: errorText });
+        ctx.logger.error(`Chat message failed`, { threadId, runId, error: errorText });
+      } finally {
+        thread.status = "idle";
+        thread.updatedAt = new Date().toISOString();
+        await saveThread(ctx, thread);
+        ctx.streams.emit(streamChannel, { type: "done" });
+        ctx.streams.close(streamChannel);
       }
-
-      // Mark thread idle
-      thread.status = "idle";
-      thread.updatedAt = new Date().toISOString();
-      await saveThread(ctx, thread);
-
-      // Signal stream completion and close the channel
-      ctx.streams.emit(streamChannel, { type: "done" });
-      ctx.streams.close(streamChannel);
-
-      ctx.logger.info(`Chat message completed`, { threadId, runId });
 
       return { ok: true, runId };
     });

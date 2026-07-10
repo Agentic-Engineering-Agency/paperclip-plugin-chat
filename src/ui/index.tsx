@@ -1,5 +1,5 @@
 import type { PluginPageProps, PluginSidebarProps } from "@paperclipai/plugin-sdk/ui";
-import { usePluginData, usePluginAction, useHostContext, useHostLocation, useHostNavigation, usePluginStream } from "@paperclipai/plugin-sdk/ui";
+import { usePluginData, usePluginAction, useHostContext, usePluginStream } from "@paperclipai/plugin-sdk/ui";
 import { useState, useEffect, useRef, useCallback, useMemo, Component } from "react";
 import type { ReactNode } from "react";
 import Markdown from "react-markdown";
@@ -911,11 +911,9 @@ function ChatInput({
   );
 }
 
-// ---------------------------------------------------------------------------
-// ChatPage — full-page chat interface rendered in the plugin page slot
-// ---------------------------------------------------------------------------
+// ChatSurface — shared chat interface used by the full page and modal launcher
 
-function ChatPageInner(props: PluginPageProps) {
+function ChatSurface({ mode = "page" }: { mode?: "page" | "modal" }) {
   const { companyId } = useHostContext();
 
   // Container ref for useAvailableHeight
@@ -1277,11 +1275,15 @@ function ChatPageInner(props: PluginPageProps) {
     setSelectedModel,
   };
 
+  const containerStyle = mode === "modal"
+    ? { height: "100%" }
+    : (availableHeight ? { height: availableHeight } : { height: "calc(100vh - 8rem)" });
+
   return (
     <div
       ref={containerRef}
-      className="flex font-[system-ui,-apple-system,sans-serif]"
-      style={availableHeight ? { height: availableHeight } : { height: "calc(100vh - 8rem)" }}
+      className="flex font-[system-ui,-apple-system,sans-serif] min-h-0"
+      style={containerStyle}
     >
       <style dangerouslySetInnerHTML={{ __html: CHAT_STYLES }} />
 
@@ -1497,36 +1499,61 @@ function ChatPageInner(props: PluginPageProps) {
   );
 }
 
-export function ChatPage(props: PluginPageProps) {
+export function ChatPage(_props: PluginPageProps) {
   return (
     <ChatPageErrorBoundary>
-      <ChatPageInner {...props} />
+      <ChatSurface mode="page" />
     </ChatPageErrorBoundary>
   );
 }
 
-// ---------------------------------------------------------------------------
-// ChatSidebarLink — sidebar nav entry that routes to the full-screen chat page
-// ---------------------------------------------------------------------------
+// ChatSidebarLink — bottom-left floating launcher and modal chat surface
 
 export function ChatSidebarLink(_props: PluginSidebarProps) {
-  const nav = useHostNavigation();
-  const { pathname } = useHostLocation();
-  const link = nav.linkProps("/chat");
-  const active = pathname.endsWith("/chat") || pathname.includes("/chat?");
+  const [open, setOpen] = useState(false);
 
   return (
-    <a
-      {...link}
-      className={
-        "flex items-center gap-2 px-3 py-2 rounded-md text-sm cursor-pointer transition-colors " +
-        (active
-          ? "bg-muted text-foreground font-medium"
-          : "text-muted-foreground hover:bg-muted hover:text-foreground")
-      }
-    >
-      <IconChat size={16} />
-      <span>Chat</span>
-    </a>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="fixed bottom-5 left-5 z-[80] flex h-12 items-center gap-2 rounded-full border border-border bg-card px-4 text-sm font-medium text-foreground shadow-lg transition-all hover:bg-accent"
+        aria-expanded={open}
+        aria-controls="paperclip-chat-modal"
+      >
+        <IconChat size={18} />
+        <span>Chat</span>
+      </button>
+
+      {open && (
+        <div
+          id="paperclip-chat-modal"
+          className="fixed bottom-20 left-5 z-[79] flex h-[min(760px,calc(100vh-7rem))] w-[min(980px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+          role="dialog"
+          aria-modal="false"
+          aria-label="Paperclip orchestrator chat"
+        >
+          <div className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <IconChat size={16} />
+              <span>Paperclip orchestrator</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-md border-none bg-transparent px-2 py-1 text-lg leading-none text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="Close chat"
+            >
+              ×
+            </button>
+          </div>
+          <div className="min-h-0 flex-1">
+            <ChatPageErrorBoundary>
+              <ChatSurface mode="modal" />
+            </ChatPageErrorBoundary>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

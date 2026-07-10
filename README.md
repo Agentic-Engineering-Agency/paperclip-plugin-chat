@@ -1,10 +1,10 @@
 # @agentic-engineering-agency/plugin-chat
 
-Multi-adapter AI chat plugin for Paperclip. Provides an agent-first conversational interface with thread management, slash commands, a sidebar entry point, and a full-screen chat page.
+Multi-adapter AI chat plugin for Paperclip. Provides an agent-first conversational interface with thread management, slash commands, a bottom-left floating launcher, and a modal orchestration chat surface.
 
 ## How It Works
 
-The plugin adds a Chat sidebar entry that opens a full-screen page in the Paperclip UI. When a user sends a message, the plugin:
+The plugin mounts a bottom-left Chat launcher in the Paperclip UI. Opening it shows a modal orchestration chat. When a user sends a message, the plugin:
 
 1. Creates a thread (persisted in plugin state)
 2. Locks the thread to the selected hired agent when one is chosen, otherwise discovers a compatible agent via `ctx.agents.list()`
@@ -26,9 +26,9 @@ npm install
 npm run build
 ```
 
-Then copy the built bundle into the Paperclip server image, enable the plugin in **Settings > Plugins**, and hard refresh the browser.
+Then install the built plugin into the Paperclip instance, enable it in **Settings > Plugins**, and hard refresh the browser.
 
-For a local smoke test, open the Chat sidebar entry, start a thread with a hired agent, send a message, and confirm the assistant response streams back into the full-screen page.
+For a local smoke test, confirm the bottom-left **Chat** launcher appears, open the modal, start a thread with a hired agent, send a message, and confirm the assistant response streams back into the modal.
 
 Run `npm test` for parser coverage, or `npm run typecheck` when you want a fast sanity check without rebuilding the UI.
 
@@ -51,10 +51,10 @@ Hard refresh the browser after deploying — the server caches bundles with ETag
 ## Features
 
 ### Chat UI
-- Full-screen chat page with a sidebar entry point instead of a bottom-right modal
+- Bottom-left floating launcher that opens a modal Paperclip orchestrator chat without navigating away from the current page
 - Agent-first start flow that lets users choose a hired agent before falling back to adapter-based selection
 - Welcome screen with quick action chips (check issues, review goals, plan work, agent status)
-- Threaded conversations with sidebar navigation
+- Threaded conversations with in-modal thread navigation
 - Rich markdown rendering (tables, code blocks, lists, links, blockquotes)
 - Collapsible tool usage display ("Used 3 tools Bash x3")
 - Auto-generated thread titles from first message
@@ -93,8 +93,9 @@ Navigate to **Settings > Plugins > Chat** (gear icon):
 
 | Capability | Purpose |
 |-----------|---------|
-| `ui.page.register` | Full chat page at `/:prefix/plugins/:pluginId` |
-| `ui.sidebar.register` | Sidebar entry point |
+| `ui.page.register` | Optional full chat page at `/:prefix/plugins/:pluginId` for direct navigation/testing |
+| `ui.sidebar.register` | Mounts the bottom-left floating launcher in the host shell |
+| `ui.action.register` | Declares the host-managed global toolbar modal launcher |
 | `agent.sessions.*` | Create and message agent sessions |
 | `agents.read` | Discover available agents/adapters |
 | `plugin.state.*` | Thread and message persistence |
