@@ -116,7 +116,7 @@ const manifest: PaperclipPluginManifestV1 = {
         placementZone: "globalToolbarButton",
         action: {
           type: "openModal",
-          target: "chat-page",
+          target: "ChatPage",
         },
         render: {
           environment: "hostOverlay",
